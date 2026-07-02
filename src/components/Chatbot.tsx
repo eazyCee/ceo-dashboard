@@ -1,11 +1,12 @@
 import React, { useState, useRef, useEffect } from "react";
-import { MessageSquare, X, Send, Bot, RefreshCw } from "lucide-react";
+import { MessageSquare, X, Send, Bot, RefreshCw, ChevronDown, LogOut } from "lucide-react";
 import { DashboardData } from "../types";
 import { streamAssist, isDiscoveryEngineConfigured } from "../services/discoveryEngine";
 
 interface ChatbotProps {
   portfolioData: DashboardData;
   user: { name: string; email: string; picture?: string; accessToken?: string; isGuest?: boolean } | null;
+  onUserUpdate?: (user: { name: string; email: string; picture?: string; accessToken?: string; isGuest?: boolean } | null) => void;
 }
 
 interface ChatMessage {
@@ -15,7 +16,7 @@ interface ChatMessage {
   sources?: string;
 }
 
-export default function Chatbot({ portfolioData, user }: ChatbotProps) {
+export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotProps) {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [sessionId, setSessionId] = useState<string>("-");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -29,8 +30,93 @@ export default function Chatbot({ portfolioData, user }: ChatbotProps) {
   ]);
   const [inputValue, setInputValue] = useState<string>("");
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [showProfileDropdown, setShowProfileDropdown] = useState<boolean>(false);
+  const [oauthConfig, setOauthConfig] = useState<{
+    isConfigured: boolean;
+    clientId: string | null;
+    redirectUri: string;
+  } | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    const fetchAuthConfig = async () => {
+      try {
+        const res = await fetch("/api/auth/config");
+        if (res.ok) {
+          const data = await res.json();
+          setOauthConfig(data);
+        }
+      } catch (err) {
+        console.error("Error fetching OAuth config in Chatbot:", err);
+      }
+    };
+    fetchAuthConfig();
+  }, []);
+
+  const handleGoogleLoginInChat = async () => {
+    if (!oauthConfig || !oauthConfig.isConfigured) return;
+
+    try {
+      const res = await fetch("/api/auth/google/url");
+      if (!res.ok) {
+        const errData = await res.json();
+        throw new Error(errData.error || "Failed to initiate Google OAuth flow");
+      }
+      const { url } = await res.json();
+
+      const width = 500;
+      const height = 650;
+      const left = window.screenX + (window.outerWidth - width) / 2;
+      const top = window.screenY + (window.outerHeight - height) / 2;
+
+      const popup = window.open(
+        url,
+        "google_oauth_popup",
+        `width=${width},height=${height},left=${left},top=${top},status=no,resizable=yes`
+      );
+
+      if (!popup) {
+        alert("Popup blocker detected! Please enable popups for this site to complete authorization.");
+        return;
+      }
+
+      const handleMessage = (event: MessageEvent) => {
+        const origin = event.origin;
+        if (!origin.endsWith(".run.app") && !origin.includes("localhost") && !origin.includes("127.0.0.1")) {
+          return;
+        }
+
+        if (event.data?.type === "OAUTH_AUTH_SUCCESS") {
+          if (onUserUpdate) {
+            onUserUpdate(event.data.user);
+          }
+          window.removeEventListener("message", handleMessage);
+        } else if (event.data?.type === "OAUTH_AUTH_FAILURE") {
+          alert(`Authentication failed: ${event.data.error || "Unknown error"}`);
+          window.removeEventListener("message", handleMessage);
+        }
+      };
+
+      window.addEventListener("message", handleMessage);
+
+    } catch (err: any) {
+      console.error("Google Authentication Initiation Error from Chatbot:", err);
+      alert(err.message || "Unable to initiate authentication.");
+    }
+  };
+
+  const handleDisconnectSession = () => {
+    if (onUserUpdate) {
+      onUserUpdate({
+        name: "Guest Executive",
+        email: "guest.ceo@altostrat.com",
+        picture: "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=128&h=128&fit=crop&crop=faces",
+        isGuest: true
+      });
+    }
+    setShowProfileDropdown(false);
+  };
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -201,27 +287,144 @@ export default function Chatbot({ portfolioData, user }: ChatbotProps) {
           className="fixed bottom-24 right-6 w-[380px] sm:w-[440px] h-[580px] bg-white border border-[#E5E5E1] rounded-xl shadow-2xl flex flex-col justify-between overflow-hidden animate-slideUp z-50"
         >
           {/* Header */}
-          <div className="bg-[#F7F7F5] p-4 border-b border-[#E5E5E1] flex justify-between items-center shrink-0">
-            <div className="flex items-center gap-2">
+          <div className="bg-[#F7F7F5] px-4 py-3 border-b border-[#E5E5E1] flex justify-between items-center shrink-0 relative">
+            <div className="flex items-center gap-2.5">
               <Bot className="h-5 w-5 text-[#1A1A1A]" />
               <div>
-                <h3 className="text-sm font-serif font-bold text-[#1A1A1A]">AI Portfolio Assistant</h3>
-                <span className="text-[10px] font-mono text-emerald-700 block flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-700 animate-pulse"></span>
-                  Gemini 3.5 Live Sync
-                </span>
+                <h3 className="text-xs font-serif font-bold text-[#1A1A1A] leading-tight">AI Portfolio Assistant</h3>
+                {user?.accessToken ? (
+                  <span className="text-[9px] font-mono text-emerald-700 font-bold flex items-center gap-1 mt-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-600 animate-pulse"></span>
+                    StreamAssist Active
+                  </span>
+                ) : (
+                  <span className="text-[9px] font-mono text-[#6B6B67] flex items-center gap-1 mt-0.5">
+                    <span className="w-1.5 h-1.5 rounded-full bg-amber-500 animate-pulse"></span>
+                    Gemini Fallback Mode
+                  </span>
+                )}
               </div>
             </div>
-            <button
-              onClick={() => setIsOpen(false)}
-              className="text-[#6B6B67] hover:text-[#1A1A1A] transition cursor-pointer border-none bg-transparent"
-            >
-              <X className="h-5 w-5" />
-            </button>
+
+            <div className="flex items-center gap-2">
+              {/* Profile dropdown trigger */}
+              {user && (
+                <button
+                  id="chatbot-profile-trigger"
+                  onClick={() => setShowProfileDropdown(!showProfileDropdown)}
+                  className="flex items-center gap-1 p-1 hover:bg-[#E5E5E1]/50 rounded-full transition cursor-pointer border-none bg-transparent"
+                >
+                  <img
+                    src={user.picture || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=128&h=128&fit=crop&crop=faces"}
+                    alt={user.name}
+                    className="w-6 h-6 rounded-full object-cover ring-1 ring-black/10"
+                  />
+                  <ChevronDown className={`h-3 w-3 text-[#6B6B67] transition-transform duration-200 ${showProfileDropdown ? "rotate-180" : ""}`} />
+                </button>
+              )}
+
+              <button
+                onClick={() => setIsOpen(false)}
+                className="text-[#6B6B67] hover:text-[#1A1A1A] p-1 rounded-full hover:bg-[#E5E5E1]/50 transition cursor-pointer border-none bg-transparent"
+                title="Close Chat"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            {/* Profile Dropdown Menu */}
+            {showProfileDropdown && user && (
+              <div
+                id="chatbot-profile-dropdown"
+                className="absolute top-full right-4 mt-1 w-64 bg-white/95 backdrop-blur-md border border-[#E5E5E1] rounded-xl shadow-xl z-50 p-4 animate-fadeIn space-y-3"
+              >
+                <div className="flex items-center gap-3">
+                  <img
+                    src={user.picture || "https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=128&h=128&fit=crop&crop=faces"}
+                    alt={user.name}
+                    className="w-10 h-10 rounded-full object-cover ring-2 ring-black/5"
+                  />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-xs font-serif font-bold text-[#1A1A1A] truncate">{user.name}</p>
+                    <p className="text-[10px] text-[#6B6B67] font-sans truncate">{user.email}</p>
+                  </div>
+                </div>
+
+                <div className="border-t border-[#E5E5E1] pt-2.5">
+                  <div className="flex items-center justify-between text-[10px] font-mono">
+                    <span className="text-[#6B6B67]">Status:</span>
+                    {user.isGuest ? (
+                      <span className="text-amber-700 bg-amber-50 px-1.5 py-0.5 rounded font-bold">Guest Mode</span>
+                    ) : (
+                      <span className="text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded font-bold">Google Connected</span>
+                    )}
+                  </div>
+                  {!user.isGuest && (
+                    <div className="flex items-center justify-between text-[10px] font-mono mt-1.5">
+                      <span className="text-[#6B6B67]">Service:</span>
+                      <span className="text-blue-700 font-bold">Discovery Engine streamAssist</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="pt-1.5 flex gap-2">
+                  {user.isGuest ? (
+                    oauthConfig?.isConfigured && (
+                      <button
+                        onClick={() => {
+                          setShowProfileDropdown(false);
+                          handleGoogleLoginInChat();
+                        }}
+                        className="w-full py-1.5 bg-[#244E80] hover:bg-[#1C3E67] text-white text-[10px] font-sans font-bold rounded-lg transition duration-150 flex items-center justify-center gap-1.5 cursor-pointer border-none"
+                      >
+                        Connect Google
+                      </button>
+                    )
+                  ) : (
+                    <button
+                      id="disconnect-google-chatbot-btn"
+                      onClick={handleDisconnectSession}
+                      className="w-full py-1.5 bg-rose-50 hover:bg-rose-100 text-rose-700 text-[10px] font-sans font-bold rounded-lg border border-rose-200 transition duration-150 flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <LogOut className="h-3 w-3" />
+                      Disconnect Account
+                    </button>
+                  )}
+                </div>
+              </div>
+            )}
           </div>
 
           {/* Messages Area */}
           <div className="flex-1 overflow-y-auto p-4 space-y-4 bg-white">
+            {user?.isGuest && oauthConfig?.isConfigured && (
+              <div className="p-4 bg-gradient-to-br from-blue-50/90 to-indigo-50/90 border border-blue-100 rounded-xl shadow-sm text-[#1A1A1A] space-y-3 animate-fadeIn mb-2">
+                <div className="flex items-start gap-3">
+                  <div className="w-8 h-8 rounded-lg bg-blue-100 flex items-center justify-center text-blue-700 shrink-0 mt-0.5 animate-pulse">
+                    <Bot className="h-4 w-4" />
+                  </div>
+                  <div className="flex-1">
+                    <h4 className="text-xs font-serif font-bold text-[#1C3E67] flex items-center gap-1.5">
+                      Enable Live StreamAssist
+                    </h4>
+                    <p className="text-[11px] text-[#4A5568] leading-relaxed mt-1 font-sans">
+                      Connect your Google Account to unlock real-time document search, live streaming, and secure corporate email analysis grounded in your Enterprise knowledgebase.
+                    </p>
+                  </div>
+                </div>
+                <button
+                  id="connect-google-chatbot-cta"
+                  onClick={handleGoogleLoginInChat}
+                  className="w-full py-2 bg-[#244E80] hover:bg-[#1C3E67] text-white text-[11px] font-sans font-bold rounded-lg transition duration-150 flex items-center justify-center gap-2 cursor-pointer border-none shadow-xs"
+                >
+                  <svg className="h-3.5 w-3.5 shrink-0 fill-current" viewBox="0 0 24 24">
+                    <path d="M12.24 10.285V14.4h6.887c-.648 2.41-2.519 4.114-5.136 4.114-3.51 0-6.377-2.87-6.377-6.38s2.867-6.38 6.377-6.38c1.623 0 3.097.55 4.27 1.626l3.097-3.099C19.205 2.13 15.96 1 12.24 1c-6.075 0-11 4.925-11 11s4.925 11 11 11c5.85 0 10.74-4.26 10.74-10.714 0-.643-.075-1.272-.24-1.714H12.24z" />
+                  </svg>
+                  Connect Google Workspace
+                </button>
+              </div>
+            )}
+
             {messages.map((msg) => (
               <div
                 key={msg.id}

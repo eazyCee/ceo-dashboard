@@ -909,7 +909,18 @@ export default function App() {
       )}
 
       {/* Real AI Chatbot integration */}
-      <Chatbot portfolioData={portfolioData} user={user} />
+      <Chatbot
+        portfolioData={portfolioData}
+        user={user}
+        onUserUpdate={(u) => {
+          setUser(u);
+          if (u) {
+            localStorage.setItem("user_profile", JSON.stringify(u));
+          } else {
+            localStorage.removeItem("user_profile");
+          }
+        }}
+      />
     </div>
   );
 }
