@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { MessageSquare, X, Send, Bot, RefreshCw, ChevronDown, LogOut, Mail, Folder, Globe, Sliders } from "lucide-react";
 import { DashboardData } from "../types";
-import { streamAssist, isDiscoveryEngineConfigured, getEngine, getDataStore } from "../services/discoveryEngine";
+import { streamAssist, isDiscoveryEngineConfigured, configureDiscoveryEngine, getEngine } from "../services/discoveryEngine";
 
 interface ChatbotProps {
   portfolioData: DashboardData;
@@ -49,39 +49,62 @@ export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotPr
 
   useEffect(() => {
     const fetchDataStores = async () => {
-      if (!user?.accessToken || !isDiscoveryEngineConfigured()) {
+      if (!user?.accessToken) {
         setAvailableDataStores([]);
         return;
       }
       setIsLoadingDataStores(true);
       try {
+        if (!isDiscoveryEngineConfigured()) {
+          try {
+            const res = await fetch("/api/discovery/config");
+            if (res.ok) {
+              const config = await res.json();
+              configureDiscoveryEngine(config.projectNumber, config.engineId, config.location);
+            } else {
+              setAvailableDataStores([]);
+              return;
+            }
+          } catch (err) {
+            console.error("Failed to load Discovery Engine configuration inside Chatbot:", err);
+            setAvailableDataStores([]);
+            return;
+          }
+        }
+
         const engine = await getEngine(user.accessToken);
         if (engine.dataStoreIds && engine.dataStoreIds.length > 0) {
-          const fetchedStores = await Promise.all(
-            engine.dataStoreIds.map(async (id) => {
-              try {
-                const info = await getDataStore(user.accessToken!, id);
-                return {
-                  id,
-                  displayName: info.displayName || id,
-                  type: info.workspaceConfig?.type || "WEBSITE",
-                  enabled: true,
-                };
-              } catch (err) {
-                console.error(`Error fetching data store ${id}:`, err);
-                return {
-                  id,
-                  displayName: id,
-                  type: "WEBSITE",
-                  enabled: true,
-                };
-              }
-            })
-          );
-          setAvailableDataStores(fetchedStores);
+          const mappedStores = engine.dataStoreIds.map((dsId) => {
+            let type = "WEBSITE";
+            let displayName = dsId;
+            const lowerId = dsId.toLowerCase();
+            if (lowerId.endsWith("_google_mail") || lowerId.includes("_google_mail") || lowerId.includes("gmail") || lowerId.includes("mail")) {
+              type = "GOOGLE_MAIL";
+              displayName = "Gmail";
+            } else if (lowerId.endsWith("_google_drive") || lowerId.includes("_google_drive") || lowerId.includes("drive")) {
+              type = "GOOGLE_DRIVE";
+              displayName = "Google Drive";
+            } else if (lowerId.endsWith("_google_calendar") || lowerId.includes("_google_calendar") || lowerId.includes("calendar")) {
+              type = "GOOGLE_CALENDAR";
+              displayName = "Google Calendar";
+            } else {
+              // Strip trailing numeric ID and format nicely
+              displayName = dsId.replace(/_\d+$/, '').replace(/[-_]/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+            }
+            return {
+              id: dsId,
+              displayName,
+              type,
+              enabled: true,
+            };
+          });
+          setAvailableDataStores(mappedStores);
+        } else {
+          setAvailableDataStores([]);
         }
       } catch (err) {
         console.error("Error fetching engine or data stores in Chatbot:", err);
+        setAvailableDataStores([]);
       } finally {
         setIsLoadingDataStores(false);
       }
