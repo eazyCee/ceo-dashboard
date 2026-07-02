@@ -519,7 +519,8 @@ export async function getSession(
   accessToken: string,
   sessionId: string
 ): Promise<DiscoveryEngineSession> {
-  const url = `${getBaseUrl()}/sessions/${sessionId}?includeAnswerDetails=true`;
+  const rawSessionId = extractSessionId(sessionId);
+  const url = `${getBaseUrl()}/sessions/${rawSessionId}?includeAnswerDetails=true`;
   const response = await fetch(url, {
     method: 'GET',
     headers: authHeaders(accessToken),
@@ -562,7 +563,8 @@ export async function deleteSession(
   accessToken: string,
   sessionId: string
 ): Promise<void> {
-  const url = `${getAssistantPath()}/sessions/${sessionId}`;
+  const rawSessionId = extractSessionId(sessionId);
+  const url = `${getAssistantPath()}/sessions/${rawSessionId}`;
   const response = await fetch(url, {
     method: 'DELETE',
     headers: authHeaders(accessToken),
@@ -588,7 +590,8 @@ export async function sendQuery(
   sessionId: string,
   queryText: string
 ): Promise<AnswerResponse> {
-  const url = `${getAssistantPath()}/sessions/${sessionId}:answer`;
+  const rawSessionId = extractSessionId(sessionId);
+  const url = `${getAssistantPath()}/sessions/${rawSessionId}:answer`;
   const body = {
     query: {
       text: queryText,
@@ -620,7 +623,8 @@ export async function streamAssist(
   const url = `${getAssistantPath()}:streamAssist?alt=sse`;
 
   // Session: resource path starting from projects/...
-  const sessionForApi = `${getResourcePath()}/sessions/${(!sessionId || sessionId === '-') ? '-' : sessionId}`;
+  const rawSessionId = (!sessionId || sessionId === '-') ? '-' : extractSessionId(sessionId);
+  const sessionForApi = `${getResourcePath()}/sessions/${rawSessionId}`;
 
   const body: Record<string, unknown> = {
     query: { text: queryText },

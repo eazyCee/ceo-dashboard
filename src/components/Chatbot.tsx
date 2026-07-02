@@ -1,7 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
-import { MessageSquare, X, Send, Bot, RefreshCw, ChevronDown, LogOut } from "lucide-react";
+import { MessageSquare, X, Send, Bot, RefreshCw, ChevronDown, LogOut, Mail, Folder, Globe, Sliders } from "lucide-react";
 import { DashboardData } from "../types";
-import { streamAssist, isDiscoveryEngineConfigured } from "../services/discoveryEngine";
+import { streamAssist, isDiscoveryEngineConfigured, getEngine, getDataStore } from "../services/discoveryEngine";
 
 interface ChatbotProps {
   portfolioData: DashboardData;
@@ -36,6 +36,58 @@ export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotPr
     clientId: string | null;
     redirectUri: string;
   } | null>(null);
+
+  interface DataStoreToggleInfo {
+    id: string;
+    displayName: string;
+    type?: string;
+    enabled: boolean;
+  }
+
+  const [availableDataStores, setAvailableDataStores] = useState<DataStoreToggleInfo[]>([]);
+  const [isLoadingDataStores, setIsLoadingDataStores] = useState<boolean>(false);
+
+  useEffect(() => {
+    const fetchDataStores = async () => {
+      if (!user?.accessToken || !isDiscoveryEngineConfigured()) {
+        setAvailableDataStores([]);
+        return;
+      }
+      setIsLoadingDataStores(true);
+      try {
+        const engine = await getEngine(user.accessToken);
+        if (engine.dataStoreIds && engine.dataStoreIds.length > 0) {
+          const fetchedStores = await Promise.all(
+            engine.dataStoreIds.map(async (id) => {
+              try {
+                const info = await getDataStore(user.accessToken!, id);
+                return {
+                  id,
+                  displayName: info.displayName || id,
+                  type: info.workspaceConfig?.type || "WEBSITE",
+                  enabled: true,
+                };
+              } catch (err) {
+                console.error(`Error fetching data store ${id}:`, err);
+                return {
+                  id,
+                  displayName: id,
+                  type: "WEBSITE",
+                  enabled: true,
+                };
+              }
+            })
+          );
+          setAvailableDataStores(fetchedStores);
+        }
+      } catch (err) {
+        console.error("Error fetching engine or data stores in Chatbot:", err);
+      } finally {
+        setIsLoadingDataStores(false);
+      }
+    };
+    fetchDataStores();
+  }, [user?.accessToken]);
 
   const messagesEndRef = useRef<HTMLDivElement | null>(null);
 
@@ -155,6 +207,10 @@ export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotPr
       let accumulatedText = "";
       
       try {
+        const enabledStoreIds = availableDataStores
+          .filter((ds) => ds.enabled)
+          .map((ds) => ds.id);
+
         const result = await streamAssist(
           user.accessToken,
           text,
@@ -173,7 +229,9 @@ export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotPr
                 }
               }
             }
-          }
+          },
+          undefined,
+          enabledStoreIds.length > 0 ? enabledStoreIds : undefined
         );
 
         const finalContent = result.fullText || accumulatedText || "No content returned by Assistant.";
@@ -473,6 +531,54 @@ export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotPr
                   {sug}
                 </button>
               ))}
+            </div>
+          )}
+          {/* Data Sources Toggle Bar */}
+          {user?.accessToken && availableDataStores.length > 0 && (
+            <div className="px-3 py-1.5 bg-[#F7F7F5] border-t border-[#E5E5E1] flex flex-wrap items-center gap-1.5 shrink-0 animate-fadeIn">
+              <span className="text-[9px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider flex items-center gap-1 mr-1">
+                <Sliders className="h-3 w-3" />
+                Grounding Sources:
+              </span>
+              {availableDataStores.map((ds) => {
+                const isMail = ds.type === "GOOGLE_MAIL" || ds.id.toLowerCase().includes("mail") || ds.id.toLowerCase().includes("gmail");
+                const isDrive = ds.type === "GOOGLE_DRIVE" || ds.id.toLowerCase().includes("drive");
+                
+                let Icon = Globe;
+                let activeColorClass = "border-emerald-600 bg-emerald-50 text-emerald-800";
+                let inactiveColorClass = "border-[#E5E5E1] bg-white text-[#6B6B67] hover:bg-[#E5E5E1]/20";
+
+                if (isMail) {
+                  Icon = Mail;
+                  activeColorClass = "border-blue-600 bg-blue-50 text-blue-800";
+                } else if (isDrive) {
+                  Icon = Folder;
+                  activeColorClass = "border-amber-600 bg-amber-50 text-amber-800";
+                }
+
+                return (
+                  <button
+                    key={ds.id}
+                    onClick={() => {
+                      setAvailableDataStores(prev =>
+                        prev.map(item =>
+                          item.id === ds.id ? { ...item, enabled: !item.enabled } : item
+                        )
+                      );
+                    }}
+                    className={`px-2 py-0.5 text-[9px] font-sans font-semibold rounded-full border flex items-center gap-1 transition-all duration-200 cursor-pointer active:scale-95 ${
+                      ds.enabled ? activeColorClass : inactiveColorClass
+                    }`}
+                    title={`${ds.enabled ? "Disable" : "Enable"} ${ds.displayName}`}
+                  >
+                    <Icon className="h-2.5 w-2.5 shrink-0" />
+                    <span>{ds.displayName}</span>
+                    <span className={`w-1 h-1 rounded-full ${
+                      ds.enabled ? "bg-current animate-pulse" : "bg-gray-300"
+                    }`} />
+                  </button>
+                );
+              })}
             </div>
           )}
 
