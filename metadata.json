@@ -1,0 +1,6 @@
+{
+  "name": "CEO Office Dashboard",
+  "description": "Multi-project executive overview with real-time performance KPIs, email summarization, automated message prioritization, AI next-step recommendations, and predictive phase-level risk analytics powered by Gemini.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
