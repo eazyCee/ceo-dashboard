@@ -11,7 +11,7 @@ dotenv.config();
 const app = express();
 app.use(express.json({ limit: '10mb' }));
 
-const PORT = 3000;
+const PORT = Number(process.env.PORT) || 3000;
 
 // Lazy initialization of Gemini client to prevent crash on startup if key is missing
 let aiClient: GoogleGenAI | null = null;
