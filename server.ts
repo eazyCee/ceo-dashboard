@@ -457,6 +457,20 @@ app.post("/api/chat", async (req, res) => {
     const authHeader = req.headers["authorization"] || "";
     const userAccessToken = authHeader.startsWith("Bearer ") ? authHeader.substring(7) : null;
 
+    if (userAccessToken) {
+      // Validate Google access token against Google Token Info API
+      try {
+        const tokenCheck = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${userAccessToken}`);
+        if (!tokenCheck.ok) {
+          console.log("OAuth token validation failed on backend. Returning 401.");
+          return res.status(401).json({ error: "Unauthorized: Google OAuth token has expired or is invalid." });
+        }
+      } catch (err) {
+        console.error("Failed to verify Google token:", err);
+        // If there's an network/internal error contacting Google, we do not block the request
+      }
+    }
+
     if (projectId && engineId) {
       console.log(`Connecting to Discovery Engine StreamAssist: project=${projectId}, location=${location}, engine=${engineId}`);
       try {
@@ -689,11 +703,14 @@ app.get(["/auth/callback", "/auth/callback/"], async (req, res) => {
     
     const userProfile = await userProfileResponse.json();
 
+    const expiryDate = tokens.expiry_date || (Date.now() + 3500 * 1000);
+
     const serializedUser = JSON.stringify({
       name: userProfile.name,
       email: userProfile.email,
       picture: userProfile.picture,
       accessToken: accessToken,
+      expiryDate: expiryDate,
     });
 
     res.send(`

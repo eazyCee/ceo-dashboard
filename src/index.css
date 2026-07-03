@@ -20,3 +20,13 @@
   to { transform: translateY(0); opacity: 1; }
 }
 
+/* Hide scrollbars for ultra-compact horizontal lists */
+.scrollbar-none::-webkit-scrollbar {
+  display: none !important;
+}
+.scrollbar-none {
+  -ms-overflow-style: none !important;
+  scrollbar-width: none !important;
+}
+
+

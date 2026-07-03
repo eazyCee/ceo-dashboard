@@ -39,7 +39,7 @@ const fmtDate = (iso: string | null) => {
 };
 
 export default function App() {
-  const [user, setUser] = useState<{ name: string; email: string; picture?: string; accessToken?: string; isGuest?: boolean } | null>(() => {
+  const [user, setUser] = useState<{ name: string; email: string; picture?: string; accessToken?: string; isGuest?: boolean; expiryDate?: number } | null>(() => {
     try {
       const saved = localStorage.getItem("user_profile");
       return saved ? JSON.parse(saved) : null;
@@ -47,6 +47,72 @@ export default function App() {
       return null;
     }
   });
+
+  const handleSignOut = () => {
+    localStorage.removeItem("user_profile");
+    setUser(null);
+  };
+
+  // Google OAuth Expiration Checks & Token Verification
+  useEffect(() => {
+    if (!user || !user.accessToken || user.isGuest) return;
+
+    // 1. Immediate offline expiration check
+    if (user.expiryDate && Date.now() > user.expiryDate) {
+      console.log("OAuth token is already expired (offline check). Redirecting to login.");
+      handleSignOut();
+      alert("Your Google OAuth session has expired. Please sign in again.");
+      return;
+    }
+
+    // 2. Active online verification against Google's Token Info API on mount
+    const verifyToken = async () => {
+      try {
+        const res = await fetch(`https://oauth2.googleapis.com/tokeninfo?access_token=${user.accessToken}`);
+        if (!res.ok) {
+          console.log("OAuth token is invalid or expired (online check). Redirecting to login.");
+          handleSignOut();
+          alert("Your Google OAuth session has expired or is invalid. Please sign in again.");
+        } else {
+          const data = await res.json();
+          const expiresIn = parseInt(data.expires_in, 10);
+          if (expiresIn && !isNaN(expiresIn)) {
+            // Update token expiry locally
+            const expiryDate = Date.now() + expiresIn * 1000;
+            const updatedUser = { ...user, expiryDate };
+            localStorage.setItem("user_profile", JSON.stringify(updatedUser));
+            setUser(updatedUser);
+          }
+        }
+      } catch (err) {
+        console.error("Failed to verify Google token on mount:", err);
+      }
+    };
+    verifyToken();
+
+    // 3. Periodic passive offline check (every 10 seconds)
+    const checkInterval = setInterval(() => {
+      if (user.expiryDate && Date.now() > user.expiryDate) {
+        console.log("OAuth token expired (periodic check). Redirecting to login.");
+        handleSignOut();
+        alert("Your Google OAuth session has expired. Please sign in again.");
+      }
+    }, 10000);
+
+    return () => clearInterval(checkInterval);
+  }, [user?.accessToken]);
+
+  // 4. Custom event listener for token expiration/validation failure events
+  useEffect(() => {
+    const handleSessionExpired = () => {
+      console.log("OAuth session expired event captured. Redirecting to login.");
+      handleSignOut();
+      alert("Your Google OAuth session has expired. Please sign in again.");
+    };
+
+    window.addEventListener("oauth_session_expired", handleSessionExpired);
+    return () => window.removeEventListener("oauth_session_expired", handleSessionExpired);
+  }, []);
 
   useEffect(() => {
     const fetchDiscoveryConfig = async () => {

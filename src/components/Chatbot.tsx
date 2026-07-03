@@ -94,12 +94,42 @@ export default function Chatbot({ portfolioData, user, onUserUpdate, onPortfolio
     };
 
     lines.forEach((line, idx) => {
+      // Header detection (e.g., ### Title)
+      const headerMatch = line.match(/^(\s*)(#{1,6})\s+(.*)$/);
+      // Horizontal rule detection (e.g., ---)
+      const hrMatch = line.match(/^(\s*)---\s*$/);
       // Bullet list detection
       const bulletMatch = line.match(/^(\s*)[-*+]\s+(.*)$/);
       // Numbered list detection
       const numberMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
 
-      if (bulletMatch) {
+      if (headerMatch) {
+        flushList(idx);
+        const level = headerMatch[2].length;
+        const headerText = headerMatch[3];
+        if (level === 1) {
+          elements.push(
+            <h2 key={`h-${idx}`} className="text-sm font-serif font-bold text-[#1A1A1A] mt-3.5 mb-1.5 border-b border-gray-100 pb-0.5">
+              {parseInlineMarkdown(headerText)}
+            </h2>
+          );
+        } else if (level === 2) {
+          elements.push(
+            <h3 key={`h-${idx}`} className="text-xs font-serif font-bold text-[#1A1A1A] mt-3 mb-1">
+              {parseInlineMarkdown(headerText)}
+            </h3>
+          );
+        } else {
+          elements.push(
+            <h4 key={`h-${idx}`} className="text-[11px] font-sans font-bold tracking-wider uppercase text-gray-500 mt-2.5 mb-1">
+              {parseInlineMarkdown(headerText)}
+            </h4>
+          );
+        }
+      } else if (hrMatch) {
+        flushList(idx);
+        elements.push(<hr key={`hr-${idx}`} className="my-3 border-gray-200" />);
+      } else if (bulletMatch) {
         if (listType !== "ul") {
           flushList(idx);
           listType = "ul";
@@ -567,6 +597,9 @@ export default function Chatbot({ portfolioData, user, onUserUpdate, onPortfolio
       });
 
       if (!res.ok) {
+        if (res.status === 401 || res.status === 403) {
+          window.dispatchEvent(new CustomEvent("oauth_session_expired"));
+        }
         throw new Error("Failed to connect to the portfolio assistant");
       }
 
@@ -838,50 +871,52 @@ export default function Chatbot({ portfolioData, user, onUserUpdate, onPortfolio
           )}
           {/* Data Sources Toggle Bar */}
           {user?.accessToken && availableDataStores.length > 0 && (
-            <div className="px-3 py-1.5 bg-[#F7F7F5] border-t border-[#E5E5E1] flex flex-wrap items-center gap-1.5 shrink-0 animate-fadeIn">
-              <span className="text-[9px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider flex items-center gap-1 mr-1">
+            <div className="px-3 py-1 bg-[#F7F7F5] border-t border-[#E5E5E1] flex items-center gap-1.5 shrink-0 animate-fadeIn select-none">
+              <span className="text-[9px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider flex items-center gap-1 mr-1 shrink-0">
                 <Sliders className="h-3 w-3" />
-                Grounding Sources:
+                Grounding:
               </span>
-              {availableDataStores.map((ds) => {
-                const isMail = ds.type === "GOOGLE_MAIL" || ds.id.toLowerCase().includes("mail") || ds.id.toLowerCase().includes("gmail");
-                const isDrive = ds.type === "GOOGLE_DRIVE" || ds.id.toLowerCase().includes("drive");
-                
-                let Icon = Globe;
-                let activeColorClass = "border-emerald-600 bg-emerald-50 text-emerald-800";
-                let inactiveColorClass = "border-[#E5E5E1] bg-white text-[#6B6B67] hover:bg-[#E5E5E1]/20";
+              <div className="flex-1 overflow-x-auto scrollbar-none flex items-center gap-1.5 py-1">
+                {availableDataStores.map((ds) => {
+                  const isMail = ds.type === "GOOGLE_MAIL" || ds.id.toLowerCase().includes("mail") || ds.id.toLowerCase().includes("gmail");
+                  const isDrive = ds.type === "GOOGLE_DRIVE" || ds.id.toLowerCase().includes("drive");
+                  
+                  let Icon = Globe;
+                  let activeColorClass = "border-emerald-600 bg-emerald-50 text-emerald-800";
+                  let inactiveColorClass = "border-[#E5E5E1] bg-white text-[#6B6B67] hover:bg-[#E5E5E1]/20";
 
-                if (isMail) {
-                  Icon = Mail;
-                  activeColorClass = "border-blue-600 bg-blue-50 text-blue-800";
-                } else if (isDrive) {
-                  Icon = Folder;
-                  activeColorClass = "border-amber-600 bg-amber-50 text-amber-800";
-                }
+                  if (isMail) {
+                    Icon = Mail;
+                    activeColorClass = "border-blue-600 bg-blue-50 text-blue-800";
+                  } else if (isDrive) {
+                    Icon = Folder;
+                    activeColorClass = "border-amber-600 bg-amber-50 text-amber-800";
+                  }
 
-                return (
-                  <button
-                    key={ds.id}
-                    onClick={() => {
-                      setAvailableDataStores(prev =>
-                        prev.map(item =>
-                          item.id === ds.id ? { ...item, enabled: !item.enabled } : item
-                        )
-                      );
-                    }}
-                    className={`px-2 py-0.5 text-[9px] font-sans font-semibold rounded-full border flex items-center gap-1 transition-all duration-200 cursor-pointer active:scale-95 ${
-                      ds.enabled ? activeColorClass : inactiveColorClass
-                    }`}
-                    title={`${ds.enabled ? "Disable" : "Enable"} ${ds.displayName}`}
-                  >
-                    <Icon className="h-2.5 w-2.5 shrink-0" />
-                    <span>{ds.displayName}</span>
-                    <span className={`w-1 h-1 rounded-full ${
-                      ds.enabled ? "bg-current animate-pulse" : "bg-gray-300"
-                    }`} />
-                  </button>
-                );
-              })}
+                  return (
+                    <button
+                      key={ds.id}
+                      onClick={() => {
+                        setAvailableDataStores(prev =>
+                          prev.map(item =>
+                            item.id === ds.id ? { ...item, enabled: !item.enabled } : item
+                          )
+                        );
+                      }}
+                      className={`px-2 py-0.5 text-[9px] font-sans font-semibold rounded-full border flex items-center gap-1 shrink-0 transition-all duration-200 cursor-pointer active:scale-95 ${
+                        ds.enabled ? activeColorClass : inactiveColorClass
+                      }`}
+                      title={`${ds.enabled ? "Disable" : "Enable"} ${ds.displayName}`}
+                    >
+                      <Icon className="h-2.5 w-2.5 shrink-0" />
+                      <span>{ds.displayName}</span>
+                      <span className={`w-1 h-1 rounded-full ${
+                        ds.enabled ? "bg-current animate-pulse" : "bg-gray-300"
+                      }`} />
+                    </button>
+                  );
+                })}
+              </div>
             </div>
           )}
 

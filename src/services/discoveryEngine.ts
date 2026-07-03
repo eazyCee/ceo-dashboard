@@ -235,6 +235,9 @@ export class DiscoveryEngineError extends Error {
     this.name = 'DiscoveryEngineError';
     this.status = status;
     this.isAuthError = status === 401 || status === 403;
+    if (this.isAuthError && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent("oauth_session_expired"));
+    }
   }
 }
 
