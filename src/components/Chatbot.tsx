@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { MessageSquare, X, Send, Bot, RefreshCw, ChevronDown, LogOut, Mail, Folder, Globe, Sliders } from "lucide-react";
+import { MessageSquare, X, Send, Bot, RefreshCw, ChevronDown, LogOut, Mail, Folder, Globe, Sliders, Sparkles, Loader2 } from "lucide-react";
 import { DashboardData } from "../types";
 import { streamAssist, isDiscoveryEngineConfigured, configureDiscoveryEngine, getEngine } from "../services/discoveryEngine";
 
@@ -7,6 +7,7 @@ interface ChatbotProps {
   portfolioData: DashboardData;
   user: { name: string; email: string; picture?: string; accessToken?: string; isGuest?: boolean } | null;
   onUserUpdate?: (user: { name: string; email: string; picture?: string; accessToken?: string; isGuest?: boolean } | null) => void;
+  onPortfolioDataUpdate?: (data: DashboardData) => void;
 }
 
 interface ChatMessage {
@@ -16,7 +17,7 @@ interface ChatMessage {
   sources?: string;
 }
 
-export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotProps) {
+export default function Chatbot({ portfolioData, user, onUserUpdate, onPortfolioDataUpdate }: ChatbotProps) {
   const [isOpen, setIsOpen] = useState<boolean>(false);
   const [sessionId, setSessionId] = useState<string>("-");
   const [messages, setMessages] = useState<ChatMessage[]>([
@@ -46,6 +47,259 @@ export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotPr
 
   const [availableDataStores, setAvailableDataStores] = useState<DataStoreToggleInfo[]>([]);
   const [isLoadingDataStores, setIsLoadingDataStores] = useState<boolean>(false);
+
+  // Task Creator overlay states
+  const [isTaskCreatorOpen, setIsTaskCreatorOpen] = useState<boolean>(false);
+  const [taskName, setTaskName] = useState<string>("");
+  const [taskPM, setTaskPM] = useState<string>("Chief of Staff");
+  const [taskSeverity, setTaskSeverity] = useState<string>("High");
+  const [taskBlockerType, setTaskBlockerType] = useState<string>("Unresolved Blocker");
+  const [taskBlockerDetail, setTaskBlockerDetail] = useState<string>("");
+  const [taskIssue, setTaskIssue] = useState<string>("");
+  const [taskValueAtRisk, setTaskValueAtRisk] = useState<string>("$1.5M");
+  const [taskValueDetail, setTaskValueDetail] = useState<string>("");
+  const [taskCeoDecision, setTaskCeoDecision] = useState<string>("");
+  const [taskNextSteps, setTaskNextSteps] = useState<string>("");
+  const [isRecommending, setIsRecommending] = useState<boolean>(false);
+
+  // Lightweight markdown parser to render beautiful HTML nodes inside chatbot bubble
+  const parseMarkdown = (text: string): React.ReactNode => {
+    if (!text) return null;
+
+    const lines = text.split("\n");
+    let isInsideList = false;
+    let listType: "ul" | "ol" | null = null;
+    const elements: React.ReactNode[] = [];
+    let listItems: React.ReactNode[] = [];
+
+    const flushList = (key: string | number) => {
+      if (listItems.length > 0) {
+        if (listType === "ul") {
+          elements.push(
+            <ul key={`list-${key}`} className="list-disc ml-5 my-1.5 space-y-1 pl-1 text-xs text-[#1A1A1A]">
+              {...listItems}
+            </ul>
+          );
+        } else {
+          elements.push(
+            <ol key={`list-${key}`} className="list-decimal ml-5 my-1.5 space-y-1 pl-1 text-xs text-[#1A1A1A]">
+              {...listItems}
+            </ol>
+          );
+        }
+        listItems = [];
+      }
+      isInsideList = false;
+      listType = null;
+    };
+
+    lines.forEach((line, idx) => {
+      // Bullet list detection
+      const bulletMatch = line.match(/^(\s*)[-*+]\s+(.*)$/);
+      // Numbered list detection
+      const numberMatch = line.match(/^(\s*)\d+\.\s+(.*)$/);
+
+      if (bulletMatch) {
+        if (listType !== "ul") {
+          flushList(idx);
+          listType = "ul";
+          isInsideList = true;
+        }
+        listItems.push(
+          <li key={`li-${idx}`} className="leading-relaxed">
+            {parseInlineMarkdown(bulletMatch[2])}
+          </li>
+        );
+      } else if (numberMatch) {
+        if (listType !== "ol") {
+          flushList(idx);
+          listType = "ol";
+          isInsideList = true;
+        }
+        listItems.push(
+          <li key={`li-${idx}`} className="leading-relaxed">
+            {parseInlineMarkdown(numberMatch[2])}
+          </li>
+        );
+      } else {
+        flushList(idx);
+        if (line.trim() !== "") {
+          // Check for bold titles at the beginning of a block
+          const isTitle = line.startsWith("**") && line.endsWith("**") && line.length < 80;
+          if (isTitle) {
+            elements.push(
+              <h4 key={`h-${idx}`} className="text-xs font-serif font-bold text-[#1A1A1A] mt-2.5 mb-1">
+                {line.slice(2, -2)}
+              </h4>
+            );
+          } else {
+            elements.push(
+              <p key={`p-${idx}`} className="my-1 text-xs leading-relaxed text-[#1A1A1A]">
+                {parseInlineMarkdown(line)}
+              </p>
+            );
+          }
+        } else {
+          // Empty line acts as a spacer
+          elements.push(<div key={`space-${idx}`} className="h-1.5" />);
+        }
+      }
+    });
+
+    flushList("end");
+    return elements;
+  };
+
+  const parseInlineMarkdown = (text: string): React.ReactNode[] => {
+    // Regex matches: **bold**, *italic*, `code`
+    const formattingRegex = /(\*\*.*?\*\*|\*.*?\*|`.*?`)/g;
+    const parts = text.split(formattingRegex);
+
+    return parts.map((part, i) => {
+      if (part.startsWith("**") && part.endsWith("**")) {
+        return <strong key={i} className="font-bold text-[#1A1A1A]">{part.slice(2, -2)}</strong>;
+      } else if (part.startsWith("*") && part.endsWith("*")) {
+        return <em key={i} className="italic text-[#333333]">{part.slice(1, -1)}</em>;
+      } else if (part.startsWith("`") && part.endsWith("`")) {
+        return <code key={i} className="font-mono bg-[#1A1A1A]/5 text-[11px] px-1 py-0.5 rounded text-rose-600 font-semibold">{part.slice(1, -1)}</code>;
+      }
+      return part;
+    });
+  };
+
+  const handleOpenTaskCreator = (content: string) => {
+    // Attempt to pre-fill from content
+    const subjectMatch = content.match(/subject:\s*([^\n]*)/i) || content.match(/title:\s*([^\n]*)/i);
+    let title = subjectMatch ? subjectMatch[1].trim() : "";
+    if (title.startsWith("**") && title.endsWith("**")) {
+      title = title.slice(2, -2).trim();
+    }
+    if (!title) {
+      title = "Urgent Email Escalation";
+    }
+    if (title.length > 50) {
+      title = title.substring(0, 47) + "...";
+    }
+
+    const fromMatch = content.match(/from:\s*([^\n<]*)/i) || content.match(/sender:\s*([^\n<]*)/i);
+    let pm = fromMatch ? fromMatch[1].trim() : "Chief of Staff";
+    if (pm.startsWith("**") && pm.endsWith("**")) {
+      pm = pm.slice(2, -2).trim();
+    }
+
+    // Use full content or trim slightly if huge
+    let issueText = content;
+    
+    setTaskName(title);
+    setTaskPM(pm);
+    setTaskIssue(issueText);
+    setTaskSeverity("High");
+    setTaskBlockerType("Unresolved Blocker");
+    setTaskBlockerDetail("Unresolved issues from email correspondence needing immediate executive decision.");
+    setTaskValueAtRisk("$1.2M");
+    setTaskValueDetail("Delay in resolution blocks downstream milestones and risks milestone payments.");
+    setTaskCeoDecision("");
+    setTaskNextSteps("");
+    setIsTaskCreatorOpen(true);
+  };
+
+  const handleRecommendActions = async () => {
+    setIsRecommending(true);
+    try {
+      const res = await fetch("/api/emails/recommend-actions", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          title: taskName,
+          issue: taskIssue,
+          blockerType: taskBlockerType,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.ceo_decision) {
+          setTaskCeoDecision(data.ceo_decision);
+        }
+        if (data.next_steps) {
+          setTaskNextSteps(data.next_steps);
+        }
+      } else {
+        alert("Failed to fetch recommendations from Gemini. Please try again.");
+      }
+    } catch (err) {
+      console.error("Error fetching actions recommendation:", err);
+      alert("An error occurred while generating recommendations.");
+    } finally {
+      setIsRecommending(false);
+    }
+  };
+
+  const handleSaveTask = () => {
+    const newId = `ceo-task-${Date.now()}`;
+    const newEscalation = {
+      rank: (portfolioData.executive_summary.top_ceo_projects?.length || 0) + 1,
+      id: newId,
+      name: taskName || "Urgent Email Escalation",
+      pm: taskPM || "Chief of Staff",
+      health: "delayed",
+      decision_type: "Urgent Action Required",
+      severity: taskSeverity || "High",
+      issue: taskIssue || "Escalated urgent email update needing review.",
+      value_at_risk: taskValueAtRisk || "$1.5M",
+      value_detail: taskValueDetail || "Delay blocks downstream milestones.",
+      blocker_type: taskBlockerType || "Unresolved Blocker",
+      blocker_detail: taskBlockerDetail || "Direct blocker identified via incoming mail.",
+      days_overdue: 1,
+      overdue_since: new Date().toLocaleDateString("en-US", { day: '2-digit', month: 'short', year: 'numeric' }),
+      overdue_items: "Incoming Blocker",
+      last_action: "Email received and processed via Portfolio Assistant.",
+      escalation_reason: "High risk item escalated directly by executive.",
+      next_steps: taskNextSteps || "CEO to review recommended actions and authorize next steps.",
+      ceo_decision: taskCeoDecision || "Review and intervene.",
+      decide_by: new Date(Date.now() + 3 * 24 * 60 * 60 * 1000).toISOString().split('T')[0],
+      wow_status: "Escalated",
+      callout_class: taskSeverity === "Critical" ? "border-l-rose-700" : "border-l-amber-600",
+      deviations: [
+        {
+          milestone: "Resolution of Blocker",
+          target_date: new Date().toLocaleDateString("en-US", { day: '2-digit', month: 'short', year: 'numeric' }),
+          actual: "Pending",
+          days_over: 1
+        }
+      ]
+    };
+
+    const updatedEscalations = [newEscalation, ...(portfolioData.executive_summary.top_ceo_projects || [])];
+    const updatedPulse = {
+      ...portfolioData.executive_summary.portfolio_pulse,
+      actions_required: (portfolioData.executive_summary.portfolio_pulse.actions_required || 0) + 1
+    };
+
+    const updatedData: DashboardData = {
+      ...portfolioData,
+      executive_summary: {
+        ...portfolioData.executive_summary,
+        top_ceo_projects: updatedEscalations,
+        portfolio_pulse: updatedPulse
+      }
+    };
+
+    if (onPortfolioDataUpdate) {
+      onPortfolioDataUpdate(updatedData);
+    }
+
+    // Success notification inside Chatbot
+    const successMsg: ChatMessage = {
+      id: `system-${Date.now()}`,
+      role: "model",
+      content: `🎉 **Successfully created Dashboard Escalation!**\n\nThe task **"${taskName}"** is now live under **CEO Action items & Escalations** on your Executive Dashboard.`
+    };
+
+    setMessages((prev) => [...prev, successMsg]);
+    setIsTaskCreatorOpen(false);
+  };
 
   useEffect(() => {
     const fetchDataStores = async () => {
@@ -506,29 +760,55 @@ export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotPr
               </div>
             )}
 
-            {messages.map((msg) => (
-              <div
-                key={msg.id}
-                className={`flex flex-col max-w-[85%] ${
-                  msg.role === "user" ? "ml-auto items-end" : "mr-auto items-start animate-fadeIn"
-                }`}
-              >
+            {messages.map((msg) => {
+              const isEmailRelated = msg.role === "model" && (
+                msg.content.toLowerCase().includes("subject:") ||
+                msg.content.toLowerCase().includes("email") ||
+                msg.content.toLowerCase().includes("from:") ||
+                msg.content.toLowerCase().includes("to:") ||
+                msg.content.toLowerCase().includes("sender:") ||
+                msg.content.toLowerCase().includes("urgent")
+              );
+
+              return (
                 <div
-                  className={`p-3 rounded-xl text-sm leading-relaxed ${
-                    msg.role === "user"
-                      ? "bg-[#1A1A1A] text-white rounded-br-none"
-                      : "bg-[#F7F7F5] text-[#1A1A1A] rounded-bl-none border border-[#E5E5E1]"
+                  key={msg.id}
+                  className={`flex flex-col max-w-[85%] ${
+                    msg.role === "user" ? "ml-auto items-end" : "mr-auto items-start animate-fadeIn"
                   }`}
                 >
-                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  <div
+                    className={`p-3 rounded-xl text-sm leading-relaxed ${
+                      msg.role === "user"
+                        ? "bg-[#1A1A1A] text-white rounded-br-none"
+                        : "bg-[#F7F7F5] text-[#1A1A1A] rounded-bl-none border border-[#E5E5E1]"
+                    }`}
+                  >
+                    {msg.role === "user" ? (
+                      <p className="whitespace-pre-wrap">{msg.content}</p>
+                    ) : (
+                      <div className="space-y-1">
+                        {parseMarkdown(msg.content)}
+                      </div>
+                    )}
+                  </div>
+                  {msg.sources && (
+                    <span className="text-[9px] font-mono text-[#8C8C88] mt-1 uppercase tracking-wider block">
+                      Sources: {msg.sources}
+                    </span>
+                  )}
+                  {isEmailRelated && (
+                    <button
+                      onClick={() => handleOpenTaskCreator(msg.content)}
+                      className="mt-2 py-1.5 px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 text-indigo-700 text-[10px] font-sans font-bold rounded-lg transition duration-150 flex items-center gap-1.5 cursor-pointer shadow-xs active:scale-95"
+                    >
+                      <Mail className="h-3.5 w-3.5 shrink-0" />
+                      Convert to Dashboard Task
+                    </button>
+                  )}
                 </div>
-                {msg.sources && (
-                  <span className="text-[9px] font-mono text-[#8C8C88] mt-1 uppercase tracking-wider block">
-                    Sources: {msg.sources}
-                  </span>
-                )}
-              </div>
-            ))}
+              );
+            })}
             {isLoading && (
               <div className="flex items-center gap-2 mr-auto bg-[#F7F7F5] p-3 rounded-xl rounded-bl-none border border-[#E5E5E1] max-w-[85%]">
                 <div className="flex gap-1">
@@ -624,6 +904,233 @@ export default function Chatbot({ portfolioData, user, onUserUpdate }: ChatbotPr
               <Send className="h-3.5 w-3.5" />
             </button>
           </div>
+
+          {/* Task Creator Sliding Glassmorphic Overlay */}
+          {isTaskCreatorOpen && (
+            <div className="absolute inset-0 bg-white/95 backdrop-blur-md z-50 flex flex-col justify-between overflow-hidden animate-slideUp">
+              {/* Overlay Header */}
+              <div className="bg-[#F7F7F5] px-4 py-3 border-b border-[#E5E5E1] flex justify-between items-center shrink-0">
+                <div className="flex items-center gap-2">
+                  <Mail className="h-4 w-4 text-indigo-600" />
+                  <h3 className="text-xs font-serif font-bold text-[#1A1A1A]">Create Executive Escalation</h3>
+                </div>
+                <button
+                  onClick={() => setIsTaskCreatorOpen(false)}
+                  className="text-[#6B6B67] hover:text-[#1A1A1A] p-1 rounded-full hover:bg-[#E5E5E1]/50 transition cursor-pointer border-none bg-transparent"
+                  title="Cancel and Close"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              {/* Scrollable Form Body */}
+              <div className="flex-1 overflow-y-auto p-4 space-y-3.5 text-xs text-[#1A1A1A]">
+                {/* Task Title */}
+                <div>
+                  <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider mb-1">
+                    Escalation / Task Title
+                  </label>
+                  <input
+                    type="text"
+                    value={taskName}
+                    onChange={(e) => setTaskName(e.target.value)}
+                    placeholder="Enter escalation title"
+                    className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium"
+                  />
+                </div>
+
+                {/* Two-Column PM & Severity */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider mb-1">
+                      PM / Owner
+                    </label>
+                    <input
+                      type="text"
+                      value={taskPM}
+                      onChange={(e) => setTaskPM(e.target.value)}
+                      placeholder="Project Manager / Owner"
+                      className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider mb-1">
+                      Severity
+                    </label>
+                    <select
+                      value={taskSeverity}
+                      onChange={(e) => setTaskSeverity(e.target.value)}
+                      className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium"
+                    >
+                      <option value="Low">Low</option>
+                      <option value="Medium">Medium</option>
+                      <option value="High">High</option>
+                      <option value="Critical">Critical</option>
+                    </select>
+                  </div>
+                </div>
+
+                {/* Blocker Type & Blocker Detail */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider mb-1">
+                      Blocker Type
+                    </label>
+                    <select
+                      value={taskBlockerType}
+                      onChange={(e) => setTaskBlockerType(e.target.value)}
+                      className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium"
+                    >
+                      <option value="Unresolved Blocker">Unresolved Blocker</option>
+                      <option value="Regulatory Blocker">Regulatory Blocker</option>
+                      <option value="Funding Delay">Funding Delay</option>
+                      <option value="Technical Blocker">Technical Blocker</option>
+                      <option value="Contractual Blocker">Contractual Blocker</option>
+                    </select>
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider mb-1">
+                      Blocker Detail
+                    </label>
+                    <input
+                      type="text"
+                      value={taskBlockerDetail}
+                      onChange={(e) => setTaskBlockerDetail(e.target.value)}
+                      placeholder="Brief details"
+                      className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium"
+                    />
+                  </div>
+                </div>
+
+                {/* Value at Risk & Value Detail */}
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider mb-1">
+                      Value at Risk
+                    </label>
+                    <input
+                      type="text"
+                      value={taskValueAtRisk}
+                      onChange={(e) => setTaskValueAtRisk(e.target.value)}
+                      placeholder="e.g. $1.5M"
+                      className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider mb-1">
+                      Value Detail
+                    </label>
+                    <input
+                      type="text"
+                      value={taskValueDetail}
+                      onChange={(e) => setTaskValueDetail(e.target.value)}
+                      placeholder="e.g. Milestone or SLA penalty"
+                      className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium"
+                    />
+                  </div>
+                </div>
+
+                {/* Issue Description Context */}
+                <div>
+                  <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider mb-1">
+                    Issue Description / Context
+                  </label>
+                  <textarea
+                    value={taskIssue}
+                    onChange={(e) => setTaskIssue(e.target.value)}
+                    placeholder="Enter context or email snippet"
+                    rows={3}
+                    className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium resize-none leading-relaxed"
+                  />
+                </div>
+
+                {/* Gemini AI Strategic Actions Generator Box */}
+                <div className="bg-indigo-50/50 border border-indigo-100 rounded-xl p-3.5 space-y-3 shadow-xs">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-1.5">
+                      <Sparkles className="h-4 w-4 text-indigo-600 animate-pulse" />
+                      <span className="text-[10px] font-sans font-bold text-[#1C3E67] uppercase tracking-wider">
+                        Strategic recommendation
+                      </span>
+                    </div>
+                    <span className="text-[9px] font-mono text-indigo-700 bg-indigo-100/70 px-1.5 py-0.5 rounded font-bold">
+                      Gemini 3.5
+                    </span>
+                  </div>
+
+                  <p className="text-[10px] text-[#4A5568] leading-relaxed font-sans">
+                    Use Gemini to analyze the context and auto-generate executive recommendations.
+                  </p>
+
+                  <button
+                    type="button"
+                    onClick={handleRecommendActions}
+                    disabled={isRecommending || !taskIssue.trim()}
+                    className="w-full py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-[10px] font-sans font-bold rounded-lg transition duration-150 flex items-center justify-center gap-2 cursor-pointer border-none shadow-xs animate-fadeIn"
+                  >
+                    {isRecommending ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                        <span>Analysing & recommending...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Sparkles className="h-3.5 w-3.5" />
+                        <span>💡 Use Gemini to Recommend Actions</span>
+                      </>
+                    )}
+                  </button>
+
+                  {/* Recommended CEO Decision Input */}
+                  <div className="space-y-1 pt-1">
+                    <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider">
+                      Recommended CEO Decision
+                    </label>
+                    <textarea
+                      value={taskCeoDecision}
+                      onChange={(e) => setTaskCeoDecision(e.target.value)}
+                      placeholder="Enter or auto-generate recommendation..."
+                      rows={2}
+                      className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium resize-none leading-relaxed"
+                    />
+                  </div>
+
+                  {/* Recovery Path Input */}
+                  <div className="space-y-1">
+                    <label className="block text-[10px] font-sans font-bold text-[#6B6B67] uppercase tracking-wider">
+                      Immediate Recovery Path
+                    </label>
+                    <textarea
+                      value={taskNextSteps}
+                      onChange={(e) => setTaskNextSteps(e.target.value)}
+                      placeholder="Enter or auto-generate recovery steps..."
+                      rows={2}
+                      className="w-full bg-white border border-[#E5E5E1] rounded-lg px-3 py-2 text-xs text-[#1A1A1A] focus:outline-none focus:border-indigo-500 font-sans font-medium resize-none leading-relaxed"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Form Footer Action Buttons */}
+              <div className="p-3 bg-[#F7F7F5] border-t border-[#E5E5E1] flex gap-2 shrink-0">
+                <button
+                  type="button"
+                  onClick={() => setIsTaskCreatorOpen(false)}
+                  className="flex-1 py-2 bg-white hover:bg-gray-100 border border-[#E5E5E1] text-[#1A1A1A] text-xs font-sans font-bold rounded-lg transition duration-150 flex items-center justify-center cursor-pointer"
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  onClick={handleSaveTask}
+                  disabled={!taskName.trim()}
+                  className="flex-1 py-2 bg-[#1A1A1A] hover:bg-[#333333] disabled:opacity-50 text-white text-xs font-sans font-bold rounded-lg transition duration-150 flex items-center justify-center cursor-pointer border-none"
+                >
+                  Create Escalation
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       )}
     </>

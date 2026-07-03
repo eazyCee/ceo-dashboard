@@ -920,6 +920,7 @@ export default function App() {
             localStorage.removeItem("user_profile");
           }
         }}
+        onPortfolioDataUpdate={setPortfolioData}
       />
     </div>
   );

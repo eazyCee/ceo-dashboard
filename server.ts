@@ -217,6 +217,63 @@ app.post("/api/project/recommend-next-steps", async (req, res) => {
   }
 });
 
+// Recommend AI-Enabled Next Steps and CEO Decision for an Email-based Escalation
+app.post("/api/emails/recommend-actions", async (req, res) => {
+  try {
+    const { title, issue, blockerType } = req.body;
+    if (!issue) {
+      return res.status(400).json({ error: "No issue/email description provided" });
+    }
+
+    const ai = getGeminiClient();
+    const prompt = `
+      You are an elite corporate Chief of Staff and strategic advisor to the CEO.
+      Analyze this urgent issue/email and recommend:
+      1. A recommended CEO Action / Decision (1 concise, highly impactful sentence on what decision the CEO should make immediately, e.g., 'Authorize PM to release escrow funds' or 'Convene emergency board meeting with legal').
+      2. An Immediate Recovery Path (1-2 clear, actionable, and concrete steps to resolve the immediate crisis or bypass the blocker, e.g., 'Draft secondary lender commitment letter. PM to mobilize alternate offshore engineering team by Tuesday.').
+
+      ISSUE TITLE: ${title || "Urgent Email Escalation"}
+      BLOCKER TYPE: ${blockerType || "Unresolved Blocker"}
+      ISSUE DESCRIPTION / EMAIL BODY:
+      ${issue}
+
+      Provide your recommendations in clean, valid JSON format matching this schema:
+      {
+        "ceo_decision": "The recommended CEO decision/action",
+        "next_steps": "The immediate recovery path"
+      }
+    `;
+
+    const response = await ai.models.generateContent({
+      model: "gemini-3.5-flash",
+      contents: prompt,
+      config: {
+        responseMimeType: "application/json",
+        responseSchema: {
+          type: Type.OBJECT,
+          properties: {
+            ceo_decision: {
+              type: Type.STRING,
+              description: "A concrete, concise, strategic recommendation of what the CEO should decide or do immediately.",
+            },
+            next_steps: {
+              type: Type.STRING,
+              description: "A concrete, 1-2 sentence immediate recovery path or resolution plan.",
+            },
+          },
+          required: ["ceo_decision", "next_steps"],
+        },
+      },
+    });
+
+    const resultText = response.text?.trim() || "{}";
+    res.json(JSON.parse(resultText));
+  } catch (error: any) {
+    console.error("Recommend email actions API error:", error);
+    res.status(500).json({ error: error.message || "Internal Server Error" });
+  }
+});
+
 // 3. Predict Project Phase Risks
 app.post("/api/project/predict-risks", async (req, res) => {
   try {
